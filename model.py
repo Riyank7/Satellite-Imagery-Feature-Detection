@@ -28,10 +28,11 @@ Epochs=a.max_epochs
 p_size= a.patch_size
 BATCH_SIZE = a.batch_size
 
+input_dir = '../three_band'
+mask_dir = '../Satellite_DSTL/Masks'
+
 def M(image_id):
-    # __author__ = amaia
-    # https://www.kaggle.com/aamaia/dstl-satellite-imagery-feature-detection/rgb-using-m-bands-example
-    filename = os.path.join(a.input_dir, '{}.tiff'.format(image_id))
+    filename = os.path.join(input_dir, '{}.tif'.format(image_id))
     img = tiff.imread(filename)
     img = np.rollaxis(img, 0, 3)
     return img
@@ -51,7 +52,7 @@ def stretch_n(bands, lower_percent=5, higher_percent=95):
     return out/255.0
 
 def mask_read(image_id):
-    filename = os.path.join(a.mask_dir, 'mask_{}.png'.format(image_id))
+    filename = os.path.join(mask_dir, 'mask_{}.png'.format(image_id))
     mask_in=cv2.imread(filename,0)
     return mask_in/255
 
@@ -93,7 +94,6 @@ def lrelu(x, a):
         # then cancels them out by subtracting/adding an absolute value term
         # leak: a*x/2 - a*abs(x)/2
         # linear: x/2 + abs(x)/2
-
         # this block looks like it has 2 inputs on the graph unless we do this
         x = tf.identity(x)
         return (0.5 * (1 + a)) * x + (0.5 * (1 - a)) * tf.abs(x)
@@ -103,7 +103,6 @@ def batchnorm(input):
     with tf.variable_scope("batchnorm"):
         # this block looks like it has 3 inputs on the graph unless we do this
         input = tf.identity(input)
-
         channels = input.get_shape()[3]
         offset = tf.get_variable("offset", [channels], dtype=tf.float32, initializer=tf.zeros_initializer())
         scale = tf.get_variable("scale", [channels], dtype=tf.float32, initializer=tf.random_normal_initializer(1.0, 0.02))
@@ -234,7 +233,7 @@ def create_model(inputs, targets):
     )
 
 def main():
-    df = pd.read_csv('./train_wkt_v4.csv')
+    df = pd.read_csv('../train_wkt_v4.csv')
     Ids=df ['ImageId'].unique()
     if a.mode=="test":
         if not os.path.exists(a.save_dir):
@@ -246,7 +245,7 @@ def main():
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
             saver.restore(sess,a.checkpoint)
-            for i in glob.glob(os.path.join(a.input_dir,'*')):
+            for i in glob.glob(os.path.join(input_dir,'*')):
                 j=os.path.split(i)[-1]
                 k=j.split('.')[0]
                 #print k
