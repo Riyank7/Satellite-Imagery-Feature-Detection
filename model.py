@@ -14,11 +14,11 @@ ngf = 64                                            # number of generator filter
 lr = 0.02
 beta1 = 0.5
 
-input_dir = '/media/atul/Elements/DSTL/three_band'  # path to find training data
-mask_dir = '../Satellite_DSTL/Masks'                # path where masks are stored 
+input_dir = './three_band'                          # path to find training data
+mask_dir = './Masks'                                # path where masks are stored 
 checkpoint_dir = './outputs/checkpoints/model.ckpt' # path where checkpoints are saved
 save_dir = './outputs'                              # path to save checkpoints and outputs
-mode = "test"
+mode = "test"                                       # Change mode here
 
 def M(image_id):
     """

@@ -1,24 +1,9 @@
-#This Python 3 environment comes with many helpful analytics libraries installed
-# It is defined by the kaggle/python docker image: https://github.com/kaggle/docker-python
-# For example, here's several helpful packages to load in 
-
-import numpy as np # linear algebra
-import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+import numpy as np 
+import pandas as pd
 import cv2
 import os
 from shapely.wkt import loads as wkt_loads
 import tifffile as tiff
-# Input data files are available in the "../input/" directory.
-# For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
-
-from subprocess import check_output
-print(check_output(["ls", "../Satellite_DSTL"]).decode("utf8"))
-
-# Any results you write to the current directory are saved as output.
-
-# The code is for python 2.7. Parts of it are taken from other posts/kernels.
-# Good luck!
-
 
 def _get_image_names(base_path, imageId):
     '''
@@ -96,15 +81,14 @@ def generate_mask_for_image_and_class(raster_size, imageId, class_type, grid_siz
     return mask
 
 
-inDir = '../Satellite_DSTL'
+inDir = './data'
 
 
 # read the training data from train_wkt_v4.csv
 df = pd.read_csv(inDir + '/train_wkt_v4.csv')
 Ids=df ['ImageId']
-# grid size will also be needed later..
+# grid size will also be needed later.
 gs = pd.read_csv(inDir + '/grid_sizes.csv', names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
-#os.mkdir('./Masks')
 for imgid in Ids:
     temp=tiff.imread('./three_band/'+imgid+'.tiff')
     s1=temp.shape[1]
