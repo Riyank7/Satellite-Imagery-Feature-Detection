@@ -22,12 +22,6 @@
 
 * Download the three band data from [here](https://www.kaggle.com/c/dstl-satellite-imagery-feature-detection/data) and unzip it.
 
-* Download `grid_sizes.csv` from [here](https://www.kaggle.com/c/dstl-satellite-imagery-feature-detection/data) and unzip it.
-
-* Download `train_wkt_v4.csv` from [here](https://www.kaggle.com/c/dstl-satellite-imagery-feature-detection/data) and unzip it.
-
-* Place `grid_sizes.csv` and `train_wkt_v4.csv` in the folder `data`.
-
 * Execute `tiff_read.py` as `python tiff_read.py`. The masks are saved in the folder `Masks`.
 
 * Then, run `model.py` as `python model.py`.
