@@ -2,42 +2,39 @@ import collections
 import numpy as np
 import tensorflow as tf
 import tifffile as tiff
-import argparse
 import glob
 import pandas as pd
 import cv2
 import os
 
-#p_size = 512
-EPS = 1e-12
+Epochs = 5  
+p_size = 512                                        # patch size taken from image for training
+BATCH_SIZE = 8
+ngf = 64                                            # number of generator filters in first conv layer
+lr = 0.02
+beta1 = 0.5
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--input_dir", help="path to folder containing images")
-parser.add_argument("--mask_dir",help="path to folder containing masks")
-parser.add_argument("--save_dir",default="./outputs",help="path to save checkpoints/outputs")
-parser.add_argument("--checkpoint", default=None, help="directory with checkpoint to resume training from or use for testing")
-parser.add_argument("--max_epochs", type=int, default=5,help="number of training epochs")
-parser.add_argument("--batch_size", type=int, default=8, help="number of images in batch for training")
-parser.add_argument("--ngf", type=int, default=64, help="number of generator filters in first conv layer")
-parser.add_argument("--lr", type=float, default=0.02, help="initial learning rate for adam")
-parser.add_argument("--beta1", type=float, default=0.5, help="momentum term of adam")
-parser.add_argument("--mode", required=True, choices=["train", "test"])
-parser.add_argument("--patch_size",type=int,default=512,help="Patch size of image to train/test")
-a = parser.parse_args()
-Epochs=a.max_epochs
-p_size= a.patch_size
-BATCH_SIZE = a.batch_size
-
-input_dir = '../three_band'
-mask_dir = '../Satellite_DSTL/Masks'
+input_dir = '/media/atul/Elements/DSTL/three_band'  # path to find training data
+mask_dir = '../Satellite_DSTL/Masks'                # path where masks are stored 
+checkpoint_dir = './outputs/checkpoints/model.ckpt' # path where checkpoints are saved
+save_dir = './outputs'                              # path to save checkpoints and outputs
+mode = "test"
 
 def M(image_id):
+    """
+    Read training images 
+    input: image_id
+    """
     filename = os.path.join(input_dir, '{}.tif'.format(image_id))
     img = tiff.imread(filename)
     img = np.rollaxis(img, 0, 3)
     return img
 
 def stretch_n(bands, lower_percent=5, higher_percent=95):
+    """
+    Normalize the image so that we have bands from only 5-95%. 
+    Extreme values are avoided.
+    """
     out = np.zeros_like(bands)
     n = bands.shape[2]
     for i in range(n):
@@ -52,27 +49,30 @@ def stretch_n(bands, lower_percent=5, higher_percent=95):
     return out/255.0
 
 def mask_read(image_id):
+    """
+    Read the masks created by after processing the tif files
+    """
     filename = os.path.join(mask_dir, 'mask_{}.png'.format(image_id))
-    mask_in=cv2.imread(filename,0)
+    mask_in = cv2.imread(filename,0)
     return mask_in/255
 
 def examples_load(Ids):
-    img_bat=[]
-    mask_bat=[]
+    img_bat = []
+    mask_bat = []
     for i in range(BATCH_SIZE):
-        img_name=Ids[0]
+        img_name = Ids[0]
         print ("Reading Image: " + img_name)
-        Ids=np.roll(Ids,1)
-        img=M(img_name)
-        img=stretch_n(img)
-        mask=mask_read(img_name)
-        mask=np.expand_dims(mask,-1)
-        x_max=img.shape[0]
-        y_max=img.shape[1]
-        x_c=np.random.randint(0,x_max-p_size)
-        y_c=np.random.randint(0,y_max-p_size)
-        img_pat=img[x_c:x_c+p_size,y_c:y_c+p_size,:]
-        mask_pat=mask[x_c:x_c+p_size,y_c:y_c+p_size,:]
+        Ids = np.roll(Ids,1)
+        img = M(img_name)
+        img = stretch_n(img)
+        mask = mask_read(img_name)
+        mask = np.expand_dims(mask,-1)
+        x_max = img.shape[0]
+        y_max = img.shape[1]
+        x_c = np.random.randint(0,x_max-p_size)
+        y_c = np.random.randint(0,y_max-p_size)
+        img_pat = img[x_c:x_c+p_size,y_c:y_c+p_size,:]
+        mask_pat = mask[x_c:x_c+p_size,y_c:y_c+p_size,:]
         img_bat.append(img_pat)
         mask_bat.append(mask_pat)
     return Ids,img_bat,mask_bat
@@ -90,8 +90,8 @@ def conv(batch_input, out_channels, stride):
 
 def lrelu(x, a):
     with tf.name_scope("lrelu"):
-        # adding these together creates the leak part and linear part
-        # then cancels them out by subtracting/adding an absolute value term
+        # Adding these together creates the leak part. 
+        # Linear part then cancels them out by subtracting/adding an absolute value term
         # leak: a*x/2 - a*abs(x)/2
         # linear: x/2 + abs(x)/2
         # this block looks like it has 2 inputs on the graph unless we do this
@@ -130,20 +130,19 @@ Model = collections.namedtuple("Model", "outputs, gen_loss, train, dice_coeff")
 
 def create_generator(generator_inputs, generator_outputs_channels,mode="train"):
     layers = []
-
     # encoder_1: [batch, 256, 256, in_channels] => [batch, 128, 128, ngf]
     with tf.variable_scope("encoder_1"):
-        output = conv(generator_inputs, a.ngf, stride=2)
+        output = conv(generator_inputs, ngf, stride=2)
         layers.append(output)
 
     layer_specs = [
-        a.ngf * 2, # encoder_2: [batch, 128, 128, ngf] => [batch, 64, 64, ngf * 2]
-        a.ngf * 4, # encoder_3: [batch, 64, 64, ngf * 2] => [batch, 32, 32, ngf * 4]
-        a.ngf * 8, # encoder_4: [batch, 32, 32, ngf * 4] => [batch, 16, 16, ngf * 8]
-        a.ngf * 8, # encoder_5: [batch, 16, 16, ngf * 8] => [batch, 8, 8, ngf * 8]
-        a.ngf * 8, # encoder_6: [batch, 8, 8, ngf * 8] => [batch, 4, 4, ngf * 8]
-        a.ngf * 8, # encoder_7: [batch, 4, 4, ngf * 8] => [batch, 2, 2, ngf * 8]
-        a.ngf * 8, # encoder_8: [batch, 2, 2, ngf * 8] => [batch, 1, 1, ngf * 8]
+        ngf * 2, # encoder_2: [batch, 128, 128, ngf] => [batch, 64, 64, ngf * 2]
+        ngf * 4, # encoder_3: [batch, 64, 64, ngf * 2] => [batch, 32, 32, ngf * 4]
+        ngf * 8, # encoder_4: [batch, 32, 32, ngf * 4] => [batch, 16, 16, ngf * 8]
+        ngf * 8, # encoder_5: [batch, 16, 16, ngf * 8] => [batch, 8, 8, ngf * 8]
+        ngf * 8, # encoder_6: [batch, 8, 8, ngf * 8] => [batch, 4, 4, ngf * 8]
+        ngf * 8, # encoder_7: [batch, 4, 4, ngf * 8] => [batch, 2, 2, ngf * 8]
+        ngf * 8, # encoder_8: [batch, 2, 2, ngf * 8] => [batch, 1, 1, ngf * 8]
     ]
 
     for out_channels in layer_specs:
@@ -156,13 +155,13 @@ def create_generator(generator_inputs, generator_outputs_channels,mode="train"):
             layers.append(output)
 
     layer_specs = [
-        (a.ngf * 8, 0.5),   # decoder_8: [batch, 1, 1, ngf * 8] => [batch, 2, 2, ngf * 8 * 2]
-        (a.ngf * 8, 0.5),   # decoder_7: [batch, 2, 2, ngf * 8 * 2] => [batch, 4, 4, ngf * 8 * 2]
-        (a.ngf * 8, 0.5),   # decoder_6: [batch, 4, 4, ngf * 8 * 2] => [batch, 8, 8, ngf * 8 * 2]
-        (a.ngf * 8, 0.0),   # decoder_5: [batch, 8, 8, ngf * 8 * 2] => [batch, 16, 16, ngf * 8 * 2]
-        (a.ngf * 4, 0.0),   # decoder_4: [batch, 16, 16, ngf * 8 * 2] => [batch, 32, 32, ngf * 4 * 2]
-        (a.ngf * 2, 0.0),   # decoder_3: [batch, 32, 32, ngf * 4 * 2] => [batch, 64, 64, ngf * 2 * 2]
-        (a.ngf, 0.0),       # decoder_2: [batch, 64, 64, ngf * 2 * 2] => [batch, 128, 128, ngf * 2]
+        (ngf * 8, 0.5),   # decoder_8: [batch, 1, 1, ngf * 8] => [batch, 2, 2, ngf * 8 * 2]
+        (ngf * 8, 0.5),   # decoder_7: [batch, 2, 2, ngf * 8 * 2] => [batch, 4, 4, ngf * 8 * 2]
+        (ngf * 8, 0.5),   # decoder_6: [batch, 4, 4, ngf * 8 * 2] => [batch, 8, 8, ngf * 8 * 2]
+        (ngf * 8, 0.0),   # decoder_5: [batch, 8, 8, ngf * 8 * 2] => [batch, 16, 16, ngf * 8 * 2]
+        (ngf * 4, 0.0),   # decoder_4: [batch, 16, 16, ngf * 8 * 2] => [batch, 32, 32, ngf * 4 * 2]
+        (ngf * 2, 0.0),   # decoder_3: [batch, 32, 32, ngf * 4 * 2] => [batch, 64, 64, ngf * 2 * 2]
+        (ngf, 0.0),       # decoder_2: [batch, 64, 64, ngf * 2 * 2] => [batch, 128, 128, ngf * 2]
     ]
 
     num_encoder_layers = len(layers)
@@ -170,8 +169,7 @@ def create_generator(generator_inputs, generator_outputs_channels,mode="train"):
         skip_layer = num_encoder_layers - decoder_layer - 1
         with tf.variable_scope("decoder_%d" % (skip_layer + 1)):
             if decoder_layer == 0:
-                # first decoder layer doesn't have skip connections
-                # since it is directly connected to the skip_layer
+                # first decoder layer doesn't have skip connections since it is directly connected to the skip_layer
                 input = layers[-1]
             else:
                 input = tf.concat([layers[-1], layers[skip_layer]], axis=3)
@@ -219,7 +217,7 @@ def create_model(inputs, targets):
     with tf.name_scope("generator_loss"):
         gen_loss = entropy    
     with tf.name_scope("generator_train"):
-            gen_optim = tf.train.AdamOptimizer(a.lr, a.beta1)
+            gen_optim = tf.train.AdamOptimizer(lr, beta1)
             gen_train = gen_optim.minimize(gen_loss)
 
     global_step = tf.train.get_or_create_global_step()
@@ -232,43 +230,50 @@ def create_model(inputs, targets):
         dice_coeff = dice_coeff,
     )
 
+## Main Function
 def main():
-    df = pd.read_csv('../train_wkt_v4.csv')
-    Ids=df ['ImageId'].unique()
-    if a.mode=="test":
-        if not os.path.exists(a.save_dir):
-            os.mkdir(a.save_dir)
-        x_=tf.placeholder(tf.float32,shape=(1,p_size,p_size,3))
+    df = pd.read_csv('./train_wkt_v4.csv')
+    Ids = df ['ImageId'].unique()               # Extract unique ImageIds from file
+
+    ## For testing
+    if mode == "test":
+        if not os.path.exists(save_dir):
+            os.mkdir(save_dir)
+        x_ = tf.placeholder(tf.float32,shape = (1,p_size,p_size,3))
         with tf.variable_scope("generator") as scope:
-            output_masks=create_generator(generator_inputs=x_,generator_outputs_channels=1,mode="test")
-        saver=tf.train.Saver()
+            output_masks = create_generator(generator_inputs = x_, generator_outputs_channels = 1, mode = "test")
+        saver = tf.train.Saver()
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
-            saver.restore(sess,a.checkpoint)
+            saver.restore(sess,checkpoint_dir)
             for i in glob.glob(os.path.join(input_dir,'*')):
-                j=os.path.split(i)[-1]
-                k=j.split('.')[0]
+                j = os.path.split(i)[-1]
+                k = j.split('.')[0]
                 #print k
-                img=M(k)
-                img=stretch_n(img)
-                img=np.expand_dims(img,0)
-                img_in=img[:,0:p_size,0:p_size,:]
-                mask_out=sess.run(output_masks,feed_dict={x_:img_in})[0,:,:,0]
+                img = M(k)                                 # Read image
+                img = stretch_n(img)
+                img = np.expand_dims(img,0)
+                img_in = img[:,0:p_size,0:p_size,:]
+                mask_out = sess.run(output_masks,feed_dict={x_:img_in})[0,:,:,0]
                 mask_out[mask_out >= 0.5] = 255
                 mask_out[mask_out < 0.5] = 0
-                cv2.imwrite(os.path.join(a.save_dir,'masko_'+str(k)+'.png'),mask_out)
-                print("Saved: "+str(os.path.join(a.save_dir,'masko_'+str(k)+'.png')))
-    elif a.mode == "train":    
-        x_=tf.placeholder(tf.float32,shape=(BATCH_SIZE,p_size,p_size,3))
-        y_=tf.placeholder(tf.float32,shape=(BATCH_SIZE,p_size,p_size,1))
-        model=create_model(x_,y_)
-        saver=tf.train.Saver()
+                cv2.imwrite(os.path.join(save_dir,'masko_' + str(k) + '.png'),mask_out)
+                print("Saved: " + str(os.path.join(save_dir,'masko_'+str(k)+'.png')))
+
+    ## For training
+    elif mode == "train":    
+        x_ = tf.placeholder(tf.float32,shape=(BATCH_SIZE,p_size,p_size,3))
+        y_ = tf.placeholder(tf.float32,shape=(BATCH_SIZE,p_size,p_size,1))
+        model = create_model(x_,y_)
+        saver = tf.train.Saver()
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
-            if a.checkpoint != None:
-                saver.restore(sess,a.checkpoint)
+            ##if checkpoint_dir != None:
+            ##    saver.restore(sess,checkpoint_dir)
+            print("No.of epochs = ",Epochs)
+            print("No.of Iterations per Epoch = 3")
             for j in range(Epochs):
-                for i in range(Ids.shape[0]/BATCH_SIZE):
+                for i in range(int(Ids.shape[0]/BATCH_SIZE)):
                 #for i in range(1):
                     #if i==21 or i==20:
                     #    fetches={
@@ -283,10 +288,10 @@ def main():
                     "gen_loss": model.gen_loss,
                     }
                     print("Epoch: %d Iteration: %d" %(j+1,i+1))
-                    Ids,x_tr,y_tr=examples_load(Ids)
-                    results=sess.run(fetches,feed_dict={x_ : x_tr,y_ : y_tr})
+                    Ids,x_tr,y_tr = examples_load(Ids)
+                    results = sess.run(fetches,feed_dict = {x_ : x_tr,y_ : y_tr})
                     print("Dice_coeff: %f\nGenLoss: %f\n"%(results["dice_coefficient"],results["gen_loss"]))
-                save_ck_path=saver.save(sess,os.path.join(a.save_path,"checkpoints","model.ckpt"))
+                save_ck_path = saver.save(sess,os.path.join(save_dir,"checkpoints","model.ckpt"))
                 print("Saved Model to %s" %(save_ck_path))
 
 main()
