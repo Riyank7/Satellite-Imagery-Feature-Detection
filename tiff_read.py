@@ -81,7 +81,7 @@ def generate_mask_for_image_and_class(raster_size, imageId, class_type, grid_siz
     return mask
 
 
-inDir = './data'
+inDir = './{/content}/competitions/dstl-satellite-imagery-feature-detection'
 
 
 # read the training data from train_wkt_v4.csv
